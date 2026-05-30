@@ -1,0 +1,6 @@
+{
+  "name": "GeoCamera",
+  "description": "Camera app that saves photos with location watermarks.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
