@@ -7,7 +7,9 @@ import android.location.Location
 import androidx.test.core.app.ApplicationProvider
 import java.io.File
 import java.io.FileOutputStream
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,7 +27,7 @@ class ImageUtilsTest {
     val (file, uri) = ImageUtils.createTempFileUri(context)
 
     assertTrue(file.exists())
-    assertTrue(file.parentFile?.absolutePath == context.externalCacheDir?.absolutePath)
+    assertEquals(context.externalCacheDir?.absolutePath, file.parentFile?.absolutePath)
     assertTrue(uri.toString().contains("${context.packageName}.provider"))
   }
 
@@ -38,7 +40,7 @@ class ImageUtilsTest {
 
     val result = ImageUtils.addWatermarkAndSave(context, invalidImage, location = null)
 
-    assertTrue(result == null)
+    assertNull(result)
   }
 
   @Test
