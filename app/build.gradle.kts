@@ -8,14 +8,14 @@ plugins {
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 35
 
   defaultConfig {
     applicationId = "com.aistudio.geocamera.qwert"
     minSdk = 24
-    targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    targetSdk = 35
+    versionCode = 2
+    versionName = "1.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -41,7 +41,15 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      signingConfig =
+          if (
+              !System.getenv("STORE_PASSWORD").isNullOrBlank() &&
+                  !System.getenv("KEY_PASSWORD").isNullOrBlank()
+          ) {
+            signingConfigs.getByName("release")
+          } else {
+            signingConfigs.getByName("debugConfig")
+          }
     }
     debug {
       signingConfig = signingConfigs.getByName("debugConfig")
