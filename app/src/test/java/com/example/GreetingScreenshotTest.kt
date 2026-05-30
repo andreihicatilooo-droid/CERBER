@@ -20,9 +20,9 @@ class GreetingScreenshotTest {
   @get:Rule val composeTestRule = createComposeRule()
 
   @Test
-  fun greeting_screenshot() {
-    composeTestRule.setContent { MyApplicationTheme { Greeting("Robolectric") } }
+  fun geoCameraApp_permissionPrompt_screenshot() {
+    composeTestRule.setContent { MyApplicationTheme { GeoCameraApp() } }
 
-    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/greeting.png")
+    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/geocamera-permission-prompt.png")
   }
 }
