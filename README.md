@@ -24,4 +24,5 @@ View your app in AI Studio: https://ai.studio/apps/cc14f557-be3e-428d-9d4c-a2776
 
 - Push a tag like `v1.1.0` to trigger the `Release APK` workflow.
 - Or run `Release APK` manually in GitHub Actions and provide a tag.
+- Add repository secrets: `KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
 - The workflow publishes `app-release.apk` as a GitHub Release asset.
