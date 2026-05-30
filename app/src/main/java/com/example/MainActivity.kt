@@ -1,23 +1,27 @@
 package com.example
 
 import android.Manifest
-import android.content.Context
-import android.location.Location
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.location.Location
 import android.net.Uri
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.Preview
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -28,7 +32,6 @@ import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -37,13 +40,19 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ImageUtils
+import com.example.GeoLocationHelper
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +62,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executor
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,15 +80,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GeoCameraApp() {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
     
     val locationHelper = remember { GeoLocationHelper(context) }
     var location by remember { mutableStateOf<Location?>(null) }
     var savedImageUri by remember { mutableStateOf<Uri?>(null) }
-    
-    var tempFile by remember { mutableStateOf<File?>(null) }
-    var tempUri by remember { mutableStateOf<Uri?>(null) }
     var showSettings by remember { mutableStateOf(false) }
+    var isCapturing by remember { mutableStateOf(false) }
+    
+    // CameraX elements
+    val previewView = remember { PreviewView(context) }
+    val imageCapture = remember { ImageCapture.Builder().build() }
 
     val permissionsState = rememberMultiplePermissionsState(
         permissions = listOf(
@@ -96,312 +109,277 @@ fun GeoCameraApp() {
         }
     }
 
-    val takePictureLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.TakePicture()
-    ) { success ->
-        if (success && tempFile != null) {
-            coroutineScope.launch(Dispatchers.IO) {
-                val finalUri = ImageUtils.addWatermarkAndSave(context, tempFile!!, location)
-                withContext(Dispatchers.Main) {
-                    if (finalUri != null) {
-                        savedImageUri = finalUri
-                        Toast.makeText(context, "DATA_COMMITTED", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(context, "ERR_WRITE_FAILED", Toast.LENGTH_SHORT).show()
-                    }
-                    tempFile?.delete()
+    LaunchedEffect(permissionsState.allPermissionsGranted) {
+        if (permissionsState.allPermissionsGranted) {
+            val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+            cameraProviderFuture.addListener({
+                val cameraProvider = cameraProviderFuture.get()
+                val preview = Preview.Builder().build().also {
+                    it.setSurfaceProvider(previewView.surfaceProvider)
                 }
-            }
-        } else {
-            tempFile?.delete()
+                
+                try {
+                    cameraProvider.unbindAll()
+                    cameraProvider.bindToLifecycle(
+                        lifecycleOwner,
+                        CameraSelector.DEFAULT_BACK_CAMERA,
+                        preview,
+                        imageCapture
+                    )
+                } catch (e: Exception) {
+                    Log.e("CameraX", "Binding failed", e)
+                }
+            }, ContextCompat.getMainExecutor(context))
         }
     }
 
-    Surface(
-        modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background
-    ) {
+    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
         if (!permissionsState.allPermissionsGranted) {
-            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(16.dp)) {
+            Box(
+                contentAlignment = Alignment.Center, 
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .fillMaxSize()
+                    .padding(16.dp)
+            ) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(0.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f))
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Text(
-                            "> SYS_ERR: ACCESS_DENIED",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            "Доступ к камере и геолокации",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            "REQUIRED: [CAMERA, LOCATION_FINE]. OVERRIDE NEEDED.",
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onErrorContainer
+                            "Приложению необходим доступ к камере и геоданным для создания фото с водяным знаком.",
+                            fontFamily = FontFamily.SansSerif,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                         )
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                         Button(
                             onClick = { permissionsState.launchMultiplePermissionRequest() },
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
-                            shape = RoundedCornerShape(0.dp)
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("EXEC // SUDO CHMOD", fontFamily = FontFamily.Monospace, color = Color.Black)
+                            Text("Разрешить", fontFamily = FontFamily.SansSerif, color = MaterialTheme.colorScheme.onPrimary)
                         }
                     }
                 }
             }
         } else {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.systemBars)
+            // Main Camera UI
+            Box(
+                modifier = Modifier.fillMaxSize()
             ) {
-                // Header
+                // Background Camera Preview
+                AndroidView(
+                    factory = { previewView },
+                    modifier = Modifier.fillMaxSize()
+                )
+                
+                // Top Overlay
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(top = innerPadding.calculateTopPadding() + 16.dp)
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Title info
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
                         Icon(
                             Icons.Default.LocationOn,
-                            contentDescription = "Location",
-                            modifier = Modifier.size(24.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                            contentDescription = "Локация",
+                            modifier = Modifier.size(20.dp),
+                            tint = Color.White
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "ONION_GEO_TAG",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.primary
+                            "GeoCam",
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.SansSerif,
+                            color = Color.White
                         )
                     }
                     
+                    // Accuracy badge
                     Row(
                         modifier = Modifier
-                            .background(MaterialTheme.colorScheme.primaryContainer)
-                            .border(1.dp, MaterialTheme.colorScheme.primary)
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .background(Color.Black.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Default.GpsFixed,
-                            contentDescription = "Accuracy",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
+                            contentDescription = "Точность",
+                            modifier = Modifier.size(16.dp),
+                            tint = Color.White
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        val accText = location?.let { "ACCURACY: ±${String.format("%.1f", it.accuracy)}m" } ?: "LINKING..."
+                        Spacer(modifier = Modifier.width(6.dp))
+                        val accText = location?.let { "±${String.format("%.1f", it.accuracy)}м" } ?: "Поиск..."
                         Text(
                             accText,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFamily = FontFamily.Monospace,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.SansSerif,
+                            color = Color.White
                         )
                     }
                 }
                 
-                // Main Camera View Finder
-                Box(
+                // Bottom Center Overlays (Coordinates etc)
+                Column(
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = innerPadding.calculateBottomPadding() + 96.dp) // space for bottom buttons
                         .fillMaxWidth()
-                        .weight(1f)
                         .padding(horizontal = 16.dp)
-                        .background(Color.Black)
-                        .border(2.dp, MaterialTheme.colorScheme.primary)
                 ) {
-                    if (savedImageUri != null) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(savedImageUri)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Last Photo",
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        // Decorative elements inside viewfinder (crosshairs)
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            // Grid lines
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)).align(Alignment.TopCenter).offset(y = 150.dp))
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)).align(Alignment.BottomCenter).offset(y = (-150).dp))
-                            Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)).align(Alignment.CenterStart).offset(x = 120.dp))
-                            Box(modifier = Modifier.width(1.dp).fillMaxHeight().background(MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)).align(Alignment.CenterEnd).offset(x = (-120).dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                            .padding(16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            val lat = location?.let { "Шир: ${String.format("%.4f", it.latitude)}°" } ?: "Ожидание..."
+                            val lng = location?.let { "Долг: ${String.format("%.4f", it.longitude)}°" } ?: "Ожидание..."
+                            Text(lat, color = Color.White, fontFamily = FontFamily.SansSerif, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text(lng, color = Color.White, fontFamily = FontFamily.SansSerif, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Spacer(modifier = Modifier.height(4.dp))
                             
-                            // Center rectangle target
-                            Box(
-                                modifier = Modifier
-                                    .size(100.dp)
-                                    .border(2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
-                                    .align(Alignment.Center),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Box(modifier = Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary.copy(alpha = 0.8f)))
-                            }
-                            
-                            // Signal Strong badge
-                            Row(
-                                modifier = Modifier
-                                    .align(Alignment.TopStart)
-                                    .padding(24.dp)
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
-                                    .border(1.dp, MaterialTheme.colorScheme.primary)
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(modifier = Modifier.size(6.dp).background(MaterialTheme.colorScheme.primary))
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    "STATUS: SECURE",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    letterSpacing = 1.sp
-                                )
-                            }
-                            
-                            // Coordinate Overlay
-                            Box(
-                                modifier = Modifier
-                                    .align(Alignment.BottomCenter)
-                                    .padding(24.dp)
-                                    .fillMaxWidth()
-                                    .background(Color.Black.copy(alpha = 0.8f))
-                                    .border(1.dp, MaterialTheme.colorScheme.primary)
-                                    .padding(16.dp)
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.Bottom
-                                ) {
-                                    Column {
-                                        Text(
-                                            "[METADATA_INJECTION]",
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                                            fontSize = 9.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            letterSpacing = 1.sp
-                                        )
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        val lat = location?.let { "LAT : ${String.format("%.4f", it.latitude)}°" } ?: "LAT : NO_DATA"
-                                        val lng = location?.let { "LNG : ${String.format("%.4f", it.longitude)}°" } ?: "LNG : NO_DATA"
-                                        Text(lat, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
-                                        Text(lng, color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
-                                        Spacer(modifier = Modifier.height(4.dp))
-                                        
-                                        val timeStr = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).format(Date())
-                                        val altStr = location?.takeIf { it.hasAltitude() }?.let { "${String.format("%.1f", it.altitude)}m" } ?: "REQ_ALT"
-                                        Text(
-                                            "ALTI: $altStr / TIME: $timeStr",
-                                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                                            fontFamily = FontFamily.Monospace,
-                                            fontSize = 10.sp
-                                        )
-                                    }
-                                    
-                                    Column(horizontalAlignment = Alignment.End) {
-                                        Box(
-                                            modifier = Modifier
-                                                .padding(bottom = 4.dp)
-                                                .size(24.dp)
-                                                .border(1.dp, MaterialTheme.colorScheme.primary),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.WaterDrop,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(16.dp)
-                                            )
-                                        }
-                                        Text(
-                                            "ARMED",
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontSize = 8.sp,
-                                            fontFamily = FontFamily.Monospace,
-                                            letterSpacing = 2.sp
-                                        )
-                                    }
-                                }
-                            }
+                            val timeStr = SimpleDateFormat("HH:mm:ss dd.MM.yyyy", Locale.getDefault()).format(Date())
+                            Text(
+                                "Время: $timeStr",
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize = 12.sp
+                            )
                         }
                     }
                 }
                 
-                // Footer
+                // Bottom UI Bar (Shutter, Gallery, Settings)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(128.dp)
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = innerPadding.calculateBottomPadding() + 24.dp)
                         .padding(horizontal = 32.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Gallery Button
+                    // Gallery (Last Photo thumbnail)
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(1.dp, MaterialTheme.colorScheme.primary),
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable {
+                                if (savedImageUri != null) {
+                                    val intent = Intent().apply {
+                                        action = Intent.ACTION_VIEW
+                                        setDataAndType(savedImageUri, "image/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (e: Exception) {
+                                        Toast.makeText(context, "Нет приложения для просмотра фото", Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    Toast.makeText(context, "Сначала сделайте фото", Toast.LENGTH_SHORT).show()
+                                }
+                            },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.ImageIcon, contentDescription = "Gallery", tint = MaterialTheme.colorScheme.primary)
+                        if (savedImageUri != null) {
+                            AsyncImage(
+                                model = ImageRequest.Builder(context)
+                                    .data(savedImageUri)
+                                    .crossfade(true)
+                                    .build(),
+                                contentDescription = "Галерея",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Icon(Icons.Default.ImageIcon, contentDescription = "Галерея", tint = Color.White)
+                        }
                     }
                     
                     // Shutter Button
                     Box(
                         modifier = Modifier
-                            .size(80.dp)
-                            .background(Color.Black)
-                            .border(2.dp, MaterialTheme.colorScheme.primary)
-                            .clickable {
-                                val (file, uri) = ImageUtils.createTempFileUri(context)
-                                tempFile = file
-                                tempUri = uri
-                                takePictureLauncher.launch(uri)
+                            .size(72.dp)
+                            .background(if (isCapturing) Color.Gray.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.8f), CircleShape)
+                            .border(4.dp, Color.White, CircleShape)
+                            .clickable(enabled = !isCapturing) {
+                                isCapturing = true
+                                val tempFile = ImageUtils.createTempFile(context)
+                                val outputOptions = ImageCapture.OutputFileOptions.Builder(tempFile).build()
+                                imageCapture.takePicture(
+                                    outputOptions,
+                                    ContextCompat.getMainExecutor(context),
+                                    object : ImageCapture.OnImageSavedCallback {
+                                        override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                                            coroutineScope.launch(Dispatchers.IO) {
+                                                val finalUri = ImageUtils.addWatermarkAndSave(context, tempFile, location)
+                                                withContext(Dispatchers.Main) {
+                                                    if (finalUri != null) {
+                                                        savedImageUri = finalUri
+                                                        Toast.makeText(context, "Сохранено", Toast.LENGTH_SHORT).show()
+                                                    } else {
+                                                        Toast.makeText(context, "Ошибка сохранения", Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    isCapturing = false
+                                                    tempFile.delete()
+                                                }
+                                            }
+                                        }
+
+                                        override fun onError(exception: ImageCaptureException) {
+                                            isCapturing = false
+                                            Toast.makeText(context, "Ошибка съемки: ${exception.message}", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                )
                             },
                         contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .background(MaterialTheme.colorScheme.primaryContainer)
-                                .border(1.dp, MaterialTheme.colorScheme.primary),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                "REC",
-                                color = MaterialTheme.colorScheme.primary,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp,
-                                letterSpacing = 2.sp
-                            )
+                        if (isCapturing) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
                         }
                     }
                     
                     // Settings Button
                     Box(
                         modifier = Modifier
-                            .size(48.dp)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(1.dp, MaterialTheme.colorScheme.primary)
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f))
                             .clickable { showSettings = true },
                         contentAlignment = Alignment.Center
                     ) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.primary)
+                        Icon(Icons.Default.Settings, contentDescription = "Настройки", tint = Color.White)
                     }
                 }
             }
@@ -411,24 +389,23 @@ fun GeoCameraApp() {
     if (showSettings) {
         AlertDialog(
             onDismissRequest = { showSettings = false },
-            containerColor = Color.Black,
-            shape = RoundedCornerShape(0.dp),
-            modifier = Modifier.border(2.dp, MaterialTheme.colorScheme.primary),
+            containerColor = MaterialTheme.colorScheme.surface,
+            shape = RoundedCornerShape(16.dp),
             title = {
                 Text(
-                    "> SYS_CONFIG",
-                    color = MaterialTheme.colorScheme.primary,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold
+                    "Настройки",
+                    fontFamily = FontFamily.SansSerif,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
                 Column {
                     Text(
-                        "NETWORK OPTIONS:",
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 12.sp
+                        "Поделиться приложением:",
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        fontFamily = FontFamily.SansSerif,
+                        fontSize = 14.sp
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     val appUrl = "https://ais-pre-7d7bzzaynft2isgsl52lkd-101130027326.europe-west2.run.app"
@@ -438,13 +415,13 @@ fun GeoCameraApp() {
                             val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                             val clip = ClipData.newPlainText("APK Link", appUrl)
                             clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "LINK_COPIED_TO_CLIPBOARD", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        shape = RoundedCornerShape(0.dp),
-                        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary)
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("DOWNLOAD_APK", color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                        Text("Скачать APK (копировать ссылку)", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
                     }
                     
                     Spacer(modifier = Modifier.height(12.dp))
@@ -453,23 +430,23 @@ fun GeoCameraApp() {
                         onClick = {
                             val sendIntent = Intent().apply {
                                 action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, "Secure Onion GeoCamera Access: $appUrl")
+                                putExtra(Intent.EXTRA_TEXT, "Смотри, классное приложение для фото с координатами: $appUrl")
                                 type = "text/plain"
                             }
                             val shareIntent = Intent.createChooser(sendIntent, null)
                             context.startActivity(shareIntent)
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        shape = RoundedCornerShape(0.dp),
-                        modifier = Modifier.fillMaxWidth().border(1.dp, MaterialTheme.colorScheme.primary)
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("SHARE_ACCESS", color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                        Text("Поделиться", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showSettings = false }) {
-                    Text("CLOSE", color = MaterialTheme.colorScheme.primary, fontFamily = FontFamily.Monospace)
+                    Text("Закрыть", fontFamily = FontFamily.SansSerif)
                 }
             }
         )

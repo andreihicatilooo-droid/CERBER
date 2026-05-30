@@ -8,7 +8,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
 import android.location.Location
 import android.net.Uri
 import android.os.Build
@@ -26,7 +25,6 @@ import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import java.io.File
-import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -61,21 +59,15 @@ class GeoLocationHelper(context: Context) {
 }
 
 object ImageUtils {
-    fun createTempFileUri(context: Context): Pair<File, Uri> {
+    fun createTempFile(context: Context): File {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-        val imageFileName = "JPEG_" + timeStamp + "_"
+        val imageFileName = "IMG_" + timeStamp + "_"
         val storageDir = context.externalCacheDir
-        val imageFile = File.createTempFile(
+        return File.createTempFile(
             imageFileName,
             ".jpg",
             storageDir
         )
-        val uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.provider",
-            imageFile
-        )
-        return Pair(imageFile, uri)
     }
 
     fun addWatermarkAndSave(context: Context, imageFile: File, location: Location?): Uri? {
@@ -86,17 +78,17 @@ object ImageUtils {
         
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
-            textSize = bitmap.width * 0.03f
-            setShadowLayer(5f, 0f, 0f, Color.BLACK)
+            textSize = bitmap.width * 0.035f
+            setShadowLayer(4f, 0f, 0f, Color.BLACK)
         }
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#44000000")
+            color = Color.parseColor("#66000000") // Semi-transparent dark background for better contrast
         }
 
-        val timeString = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())
-        val latString = location?.let { "Lat: ${String.format("%.4f", it.latitude)}" } ?: "Lat: N/A"
-        val lngString = location?.let { "Lng: ${String.format("%.4f", it.longitude)}" } ?: "Lng: N/A"
-        val accString = location?.let { "Accuracy: ${String.format("%.1f", it.accuracy)}m" } ?: "Accuracy: N/A"
+        val timeString = SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+        val latString = location?.let { "Шир: ${String.format("%.4f", it.latitude)}" } ?: "Шир: нет данных"
+        val lngString = location?.let { "Долг: ${String.format("%.4f", it.longitude)}" } ?: "Долг: нет данных"
+        val accString = location?.let { "Точность: ${String.format("%.1f", it.accuracy)}м" } ?: "Точность: нет данных"
 
         val lines = listOf(timeString, latString, lngString, accString)
         
