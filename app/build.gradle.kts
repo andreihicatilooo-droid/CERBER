@@ -6,6 +6,20 @@ plugins {
   alias(libs.plugins.secrets)
 }
 
+val isReleaseBuildRequested =
+    gradle.startParameter.taskNames.any { taskName ->
+      taskName.contains("release", ignoreCase = true)
+    }
+
+fun requiredReleaseEnv(name: String): String {
+  return System.getenv(name)
+      ?: if (isReleaseBuildRequested) {
+        error("Missing required environment variable for release signing: $name")
+      } else {
+        ""
+      }
+}
+
 android {
   namespace = "com.example"
   compileSdk = 36
@@ -22,11 +36,11 @@ android {
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/release-keystore.jks"
+      val keystorePath = requiredReleaseEnv("KEYSTORE_PATH")
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = System.getenv("KEY_ALIAS")
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = requiredReleaseEnv("STORE_PASSWORD")
+      keyAlias = requiredReleaseEnv("KEY_ALIAS")
+      keyPassword = requiredReleaseEnv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
