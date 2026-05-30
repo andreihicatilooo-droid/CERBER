@@ -19,3 +19,10 @@ View your app in AI Studio: https://ai.studio/apps/cc14f557-be3e-428d-9d4c-a2776
 4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
 5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
 6. Run the app on an emulator or physical device
+
+## Release APK
+
+- Push a tag like `v1.1.0` to trigger the `Release APK` workflow.
+- Or run `Release APK` manually in GitHub Actions and provide a tag.
+- Add repository secrets: `KEYSTORE_BASE64`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`.
+- The workflow publishes `app-release.apk` as a GitHub Release asset.

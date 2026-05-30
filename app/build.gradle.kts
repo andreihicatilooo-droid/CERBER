@@ -6,27 +6,41 @@ plugins {
   alias(libs.plugins.secrets)
 }
 
+val isReleaseBuildRequested =
+    gradle.startParameter.taskNames.any { taskName ->
+      taskName.contains("release", ignoreCase = true)
+    }
+
+fun requiredReleaseEnv(name: String): String {
+  return System.getenv(name)
+      ?: if (isReleaseBuildRequested) {
+        error("Missing required environment variable for release signing: $name")
+      } else {
+        ""
+      }
+}
+
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.geocamera.qwert"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "1.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath = requiredReleaseEnv("KEYSTORE_PATH")
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = requiredReleaseEnv("STORE_PASSWORD")
+      keyAlias = requiredReleaseEnv("KEY_ALIAS")
+      keyPassword = requiredReleaseEnv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
