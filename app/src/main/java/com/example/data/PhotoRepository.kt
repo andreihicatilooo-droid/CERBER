@@ -33,16 +33,16 @@ class PhotoRepository(
             inputStream.close()
             outputStream.close()
 
-            val requestFile = tempFile.asRequestBody("image/jpeg".toMediaTypeOrNull())
-            val body = MultipartBody.Part.createFormData("file", tempFile.name, requestFile)
+            val uploader = com.example.network.NboxUploaderService()
+            val results = uploader.uploadFilesBatched(listOf(tempFile))
+            val result = results.firstOrNull()
 
-            val response = NetworkClient.nboxApi.uploadPhoto(body)
             tempFile.delete()
 
-            if (response.url != null) {
-                Result.success(response.url)
+            if (result?.directUrl != null) {
+                Result.success(result.directUrl)
             } else {
-                Result.failure(Exception("Upload failed, no URL returned"))
+                Result.failure(Exception("Upload failed, no URL returned: ${result?.filename}"))
             }
         } catch (e: Exception) {
             Result.failure(e)

@@ -10,14 +10,6 @@ object NetworkClient {
         .addInterceptor(HttpLoggingInterceptor().apply { level = HttpLoggingInterceptor.Level.BODY })
         .build()
 
-    private val retrofit = Retrofit.Builder()
-        .baseUrl("https://nbox.me/") // Placeholder base URL for nbox.me
-        .client(client)
-        .addConverterFactory(MoshiConverterFactory.create())
-        .build()
-
-    val nboxApi: NboxApi = retrofit.create(NboxApi::class.java)
-
     private val placesRetrofit = Retrofit.Builder()
         .baseUrl("https://maps.googleapis.com/maps/api/")
         .client(client)
