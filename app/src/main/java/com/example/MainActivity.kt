@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.GpsFixed
 import androidx.compose.material.icons.filled.Image as ImageIcon
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -92,6 +93,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun GeoCameraAppUI(
     onNavigateToAlbum: () -> Unit,
+    onNavigateToMap: () -> Unit,
     onImageSaved: (String, Double?, Double?) -> Unit,
     settingsManager: SettingsManager
 ) {
@@ -303,6 +305,20 @@ fun GeoCameraAppUI(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Map Button
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black.copy(alpha = 0.5f))
+                            .clickable {
+                                onNavigateToMap()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Map, contentDescription = "Карта", tint = Color.White)
+                    }
+
                     // Gallery (Last Photo thumbnail)
                     Box(
                         modifier = Modifier

@@ -57,31 +57,35 @@ fun AppNavHost(navController: NavHostController, viewModel: MainViewModel, setti
             composable("camera") {
                 GeoCameraAppUI(
                     onNavigateToAlbum = { navController.navigate("album") },
+                    onNavigateToMap = { navController.navigate("map") },
                     onImageSaved = { uriString, lat, lng ->
                         viewModel.insertPhoto(uriString, lat, lng)
                     },
                     settingsManager = settingsManager
                 )
             }
-        composable("album") {
-            AlbumScreen(
-                viewModel = viewModel,
-                onBack = { navController.popBackStack() },
-                onPhotoClick = { id -> navController.navigate("edit/$id") }
-            )
+            composable("album") {
+                AlbumScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
+                    onPhotoClick = { id -> navController.navigate("edit/$id") }
+                )
+            }
+            composable(
+                "edit/{id}",
+                arguments = listOf(navArgument("id") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val id = backStackEntry.arguments?.getInt("id") ?: return@composable
+                EditPhotoScreen(
+                    id = id,
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() }
+                )
+            }
+            composable("map") {
+                MapScreen(onBack = { navController.popBackStack() })
+            }
         }
-        composable(
-            "edit/{id}",
-            arguments = listOf(navArgument("id") { type = NavType.IntType })
-        ) { backStackEntry ->
-            val id = backStackEntry.arguments?.getInt("id") ?: return@composable
-            EditPhotoScreen(
-                id = id,
-                viewModel = viewModel,
-                onBack = { navController.popBackStack() }
-            )
-        }
-    }
     }
 }
 

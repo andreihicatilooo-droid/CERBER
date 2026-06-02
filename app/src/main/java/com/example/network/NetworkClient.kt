@@ -17,4 +17,12 @@ object NetworkClient {
         .build()
 
     val nboxApi: NboxApi = retrofit.create(NboxApi::class.java)
+
+    private val placesRetrofit = Retrofit.Builder()
+        .baseUrl("https://maps.googleapis.com/maps/api/")
+        .client(client)
+        .addConverterFactory(MoshiConverterFactory.create())
+        .build()
+
+    val placesApi: PlacesApi = placesRetrofit.create(PlacesApi::class.java)
 }
