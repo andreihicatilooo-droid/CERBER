@@ -64,13 +64,25 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executor
 
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation.compose.rememberNavController
+import com.example.ui.AppNavHost
+import com.example.ui.MainViewModel
+import com.example.ui.MainViewModelFactory
+import com.example.data.SettingsManager
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MyApplicationTheme {
-                GeoCameraApp()
+                val app = application as MainApplication
+                val viewModel: MainViewModel = viewModel(factory = MainViewModelFactory(app.repository))
+                val navController = rememberNavController()
+                val context = LocalContext.current
+                val settingsManager = remember { SettingsManager(context) }
+                AppNavHost(navController = navController, viewModel = viewModel, settingsManager = settingsManager)
             }
         }
     }
@@ -78,7 +90,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun GeoCameraApp() {
+fun GeoCameraAppUI(
+    onNavigateToAlbum: () -> Unit,
+    onImageSaved: (String, Double?, Double?) -> Unit,
+    settingsManager: SettingsManager
+) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
@@ -294,20 +310,7 @@ fun GeoCameraApp() {
                             .clip(CircleShape)
                             .background(Color.Black.copy(alpha = 0.5f))
                             .clickable {
-                                if (savedImageUri != null) {
-                                    val intent = Intent().apply {
-                                        action = Intent.ACTION_VIEW
-                                        setDataAndType(savedImageUri, "image/*")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    try {
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        Toast.makeText(context, "Нет приложения для просмотра фото", Toast.LENGTH_SHORT).show()
-                                    }
-                                } else {
-                                    Toast.makeText(context, "Сначала сделайте фото", Toast.LENGTH_SHORT).show()
-                                }
+                                onNavigateToAlbum()
                             },
                         contentAlignment = Alignment.Center
                     ) {
@@ -342,10 +345,11 @@ fun GeoCameraApp() {
                                     object : ImageCapture.OnImageSavedCallback {
                                         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
                                             coroutineScope.launch(Dispatchers.IO) {
-                                                val finalUri = ImageUtils.addWatermarkAndSave(context, tempFile, location)
+                                                val finalUri = ImageUtils.addWatermarkAndSaveToInternal(context, tempFile, location)
                                                 withContext(Dispatchers.Main) {
                                                     if (finalUri != null) {
                                                         savedImageUri = finalUri
+                                                        onImageSaved(finalUri.toString(), location?.latitude, location?.longitude)
                                                         Toast.makeText(context, "Сохранено", Toast.LENGTH_SHORT).show()
                                                     } else {
                                                         Toast.makeText(context, "Ошибка сохранения", Toast.LENGTH_SHORT).show()
@@ -387,68 +391,129 @@ fun GeoCameraApp() {
     }
 
     if (showSettings) {
-        AlertDialog(
-            onDismissRequest = { showSettings = false },
-            containerColor = MaterialTheme.colorScheme.surface,
-            shape = RoundedCornerShape(16.dp),
-            title = {
-                Text(
-                    "Настройки",
-                    fontFamily = FontFamily.SansSerif,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-            },
-            text = {
-                Column {
+        var showPasswordDialog by remember { mutableStateOf(false) }
+        var currentPasswordState by remember { mutableStateOf(settingsManager.getPassword() ?: "") }
+
+        if (showPasswordDialog) {
+            var newPassword by remember { mutableStateOf(currentPasswordState) }
+            AlertDialog(
+                onDismissRequest = { showPasswordDialog = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                title = { Text("Пароль", color = MaterialTheme.colorScheme.onSurface) },
+                text = {
+                    Column {
+                        Text("Оставьте пустым для отключения пароля", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        OutlinedTextField(
+                            value = newPassword,
+                            onValueChange = { newPassword = it },
+                            label = { Text("Новый пароль") },
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        settingsManager.setPassword(if (newPassword.isBlank()) null else newPassword)
+                        currentPasswordState = settingsManager.getPassword() ?: ""
+                        showPasswordDialog = false
+                    }) {
+                        Text("Сохранить")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showPasswordDialog = false }) {
+                        Text("Отмена")
+                    }
+                }
+            )
+        } else {
+            AlertDialog(
+                onDismissRequest = { showSettings = false },
+                containerColor = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(16.dp),
+                title = {
                     Text(
-                        "Поделиться приложением:",
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        "Настройки",
                         fontFamily = FontFamily.SansSerif,
-                        fontSize = 14.sp
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    val appUrl = "https://ais-pre-7d7bzzaynft2isgsl52lkd-101130027326.europe-west2.run.app"
-                    
-                    Button(
-                        onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("APK Link", appUrl)
-                            clipboard.setPrimaryClip(clip)
-                            Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Скачать APK (копировать ссылку)", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
+                },
+                text = {
+                    Column {
+                        Text(
+                            "Безопасность:",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            fontFamily = FontFamily.SansSerif,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { showPasswordDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(if (currentPasswordState.isEmpty()) "Установить пароль" else "Изменить пароль", color = MaterialTheme.colorScheme.onSecondaryContainer, fontFamily = FontFamily.SansSerif)
+                        }
+
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+
+                        Text(
+                            "Поделиться приложением:",
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                            fontFamily = FontFamily.SansSerif,
+                            fontSize = 14.sp
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        val appUrl = "https://ais-pre-7d7bzzaynft2isgsl52lkd-101130027326.europe-west2.run.app"
+                        
+                        Button(
+                            onClick = {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = ClipData.newPlainText("APK Link", appUrl)
+                                clipboard.setPrimaryClip(clip)
+                                Toast.makeText(context, "Ссылка скопирована", Toast.LENGTH_SHORT).show()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Скачать APK (копировать ссылку)", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
+                        }
+                        
+                        Spacer(modifier = Modifier.height(12.dp))
+                        
+                        Button(
+                            onClick = {
+                                val sendIntent = Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(Intent.EXTRA_TEXT, "Смотри, классное приложение для фото с координатами: $appUrl")
+                                    type = "text/plain"
+                                }
+                                val shareIntent = Intent.createChooser(sendIntent, null)
+                                context.startActivity(shareIntent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Поделиться", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
+                        }
                     }
-                    
-                    Spacer(modifier = Modifier.height(12.dp))
-                    
-                    Button(
-                        onClick = {
-                            val sendIntent = Intent().apply {
-                                action = Intent.ACTION_SEND
-                                putExtra(Intent.EXTRA_TEXT, "Смотри, классное приложение для фото с координатами: $appUrl")
-                                type = "text/plain"
-                            }
-                            val shareIntent = Intent.createChooser(sendIntent, null)
-                            context.startActivity(shareIntent)
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Поделиться", color = MaterialTheme.colorScheme.onPrimaryContainer, fontFamily = FontFamily.SansSerif)
+                },
+                confirmButton = {
+                    TextButton(onClick = { showSettings = false }) {
+                        Text("Закрыть", fontFamily = FontFamily.SansSerif)
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showSettings = false }) {
-                    Text("Закрыть", fontFamily = FontFamily.SansSerif)
-                }
-            }
-        )
+            )
+        }
     }
 }

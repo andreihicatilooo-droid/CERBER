@@ -70,7 +70,7 @@ object ImageUtils {
         )
     }
 
-    fun addWatermarkAndSave(context: Context, imageFile: File, location: Location?): Uri? {
+    fun addWatermarkAndSaveToInternal(context: Context, imageFile: File, location: Location?): Uri? {
         val bitmap = BitmapFactory.decodeFile(imageFile.absolutePath) ?: return null
 
         val resultBitmap = bitmap.copy(Bitmap.Config.ARGB_8888, true)
@@ -117,19 +117,39 @@ object ImageUtils {
             top += paint.textSize + 10f
         }
 
-        return saveToMediaStore(context, resultBitmap)
-    }
-
-    private fun saveToMediaStore(context: Context, bitmap: Bitmap): Uri? {
         val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val name = "GeoCam_$timeStamp.jpg"
+        
+        val secureDir = File(context.filesDir, "secure_vault")
+        if (!secureDir.exists()) secureDir.mkdirs()
+        
+        val outFile = File(secureDir, name)
+        return try {
+            java.io.FileOutputStream(outFile).use { out ->
+                resultBitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
+            }
+            Uri.fromFile(outFile)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    fun exportToGallery(context: Context, uriString: String): Boolean {
+        val uri = Uri.parse(uriString)
+        val file = File(uri.path ?: return false)
+        if (!file.exists()) return false
+
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath) ?: return false
+        val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val name = "GeoCam_Export_$timeStamp.jpg"
         
         val values = ContentValues().apply {
             put(MediaStore.Images.Media.DISPLAY_NAME, name)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 put(MediaStore.Images.Media.IS_PENDING, 1)
-                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/GeoCam")
+                put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/GeoCam_Export")
             }
         }
 
@@ -139,22 +159,22 @@ object ImageUtils {
             MediaStore.Images.Media.EXTERNAL_CONTENT_URI
         }
 
-        val uri = context.contentResolver.insert(collection, values) ?: return null
+        val targetUri = context.contentResolver.insert(collection, values) ?: return false
         
-        try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
+        return try {
+            context.contentResolver.openOutputStream(targetUri)?.use { out ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 95, out)
             }
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 values.clear()
                 values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                context.contentResolver.update(uri, values, null, null)
+                context.contentResolver.update(targetUri, values, null, null)
             }
-            return uri
+            true
         } catch (e: Exception) {
-            context.contentResolver.delete(uri, null, null)
-            return null
+            context.contentResolver.delete(targetUri, null, null)
+            false
         }
     }
 }
